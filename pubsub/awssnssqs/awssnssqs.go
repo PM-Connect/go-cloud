@@ -81,6 +81,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/google/wire"
+
 	gcaws "gocloud.dev/aws"
 	"gocloud.dev/gcerrors"
 	"gocloud.dev/internal/escape"
@@ -671,6 +672,7 @@ func (s *subscription) ReceiveBatch(ctx context.Context, maxMessages int) ([]*dr
 		QueueUrl:              aws.String(s.qURL),
 		MaxNumberOfMessages:   aws.Int64(int64(maxMessages)),
 		MessageAttributeNames: []*string{aws.String("All")},
+		AttributeNames:        []*string{aws.String("All")},
 	}
 	if s.opts.WaitTime != 0 {
 		req.WaitTimeSeconds = aws.Int64(int64(s.opts.WaitTime.Seconds()))
