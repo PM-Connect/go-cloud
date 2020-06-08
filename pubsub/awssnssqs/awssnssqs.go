@@ -658,6 +658,7 @@ func (s *subscription) ReceiveBatch(ctx context.Context, maxMessages int) ([]*dr
 		QueueUrl:              aws.String(s.qURL),
 		MaxNumberOfMessages:   aws.Int64(int64(maxMessages)),
 		MessageAttributeNames: []*string{aws.String("All")},
+		AttributeNames:        []*string{aws.String("All")},
 	})
 	if err != nil {
 		return nil, err
