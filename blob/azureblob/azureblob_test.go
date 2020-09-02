@@ -327,6 +327,7 @@ func TestOpenerFromEnv(t *testing.T) {
 		accountKey    AccountKey
 		storageDomain StorageDomain
 		sasToken      SASToken
+		protocol      Protocol
 
 		wantSharedCreds   bool
 		wantSASToken      SASToken
@@ -350,7 +351,7 @@ func TestOpenerFromEnv(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			o, err := openerFromEnv(test.accountName, test.accountKey, test.sasToken, test.storageDomain)
+			o, err := openerFromEnv(test.accountName, test.accountKey, test.sasToken, test.storageDomain, test.protocol)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -382,17 +383,99 @@ func TestOpenerFromEnv(t *testing.T) {
 	}
 }
 
+func Test_openBucket(t *testing.T) {
+	tests := []struct {
+		name             string
+		protocol         Protocol
+		storageDomain    StorageDomain
+		wantContainerURL string
+		wantErr          bool
+	}{
+		{
+			name:             "empty protocol",
+			protocol:         "",
+			wantContainerURL: "https://gocloudblobtests.blob.core.windows.net/mycontainer",
+			wantErr:          false,
+		},
+		{
+			name:             "http",
+			protocol:         "http",
+			wantContainerURL: "http://gocloudblobtests.blob.core.windows.net/mycontainer",
+			wantErr:          false,
+		},
+		{
+			name:             "local emulator 127.0.0.1:10000",
+			protocol:         "http",
+			storageDomain:    "127.0.0.1:10000",
+			wantContainerURL: "http://127.0.0.1:10000/gocloudblobtests/mycontainer",
+			wantErr:          false,
+		},
+		{
+			name:             "local emulator localhost:10000",
+			protocol:         "http",
+			storageDomain:    "localhost:10000",
+			wantContainerURL: "http://localhost:10000/gocloudblobtests/mycontainer",
+			wantErr:          false,
+		},
+		{
+			name:             "custom storage domain",
+			protocol:         "",
+			storageDomain:    "blob.core.usgovcloudapi.net",
+			wantContainerURL: "https://gocloudblobtests.blob.core.usgovcloudapi.net/mycontainer",
+			wantErr:          false,
+		},
+		{
+			name:             "https",
+			protocol:         "https",
+			wantContainerURL: "https://gocloudblobtests.blob.core.windows.net/mycontainer",
+			wantErr:          false,
+		},
+		{
+			name:             "invalid",
+			protocol:         "invalid",
+			wantContainerURL: "",
+			wantErr:          true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			accountKey := base64.StdEncoding.EncodeToString([]byte("FAKECREDS"))
+			cred, err := azblob.NewSharedKeyCredential(string(accountName), accountKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pipeline := azblob.NewPipeline(cred, azblob.PipelineOptions{})
+			containerName := "mycontainer"
+			o := &Options{Protocol: test.protocol, StorageDomain: test.storageDomain}
+			b, err := openBucket(ctx, pipeline, accountName, containerName, o)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("wantErr=%v but got=%v", test.wantErr, err)
+			}
+			if !test.wantErr {
+				gotURL := b.containerURL.String()
+				if gotURL != test.wantContainerURL {
+					t.Errorf("got containerURL = %v, want = %v", gotURL, test.wantContainerURL)
+				}
+			}
+		})
+	}
+}
+
 func TestOpenBucketFromURL(t *testing.T) {
 	prevAccount := os.Getenv("AZURE_STORAGE_ACCOUNT")
 	prevKey := os.Getenv("AZURE_STORAGE_KEY")
 	prevEnv := os.Getenv("AZURE_STORAGE_DOMAIN")
+	prevProtocol := os.Getenv("AZURE_STORAGE_PROTOCOL")
 	os.Setenv("AZURE_STORAGE_ACCOUNT", "my-account")
 	os.Setenv("AZURE_STORAGE_KEY", "bXlrZXk=") // mykey base64 encoded
 	os.Setenv("AZURE_STORAGE_DOMAIN", "my-cloud")
+	os.Setenv("AZURE_STORAGE_PROTOCOL", "http")
 	defer func() {
 		os.Setenv("AZURE_STORAGE_ACCOUNT", prevAccount)
 		os.Setenv("AZURE_STORAGE_KEY", prevKey)
 		os.Setenv("AZURE_STORAGE_DOMAIN", prevEnv)
+		os.Setenv("AZURE_STORAGE_PROTOCOL", prevProtocol)
 	}()
 
 	tests := []struct {
