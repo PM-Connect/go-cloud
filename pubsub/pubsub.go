@@ -77,6 +77,8 @@ import (
 	"unicode/utf8"
 
 	gax "github.com/googleapis/gax-go"
+	"golang.org/x/sync/errgroup"
+
 	"gocloud.dev/gcerrors"
 	"gocloud.dev/internal/gcerr"
 	"gocloud.dev/internal/oc"
@@ -84,7 +86,6 @@ import (
 	"gocloud.dev/internal/retry"
 	"gocloud.dev/pubsub/batcher"
 	"gocloud.dev/pubsub/driver"
-	"golang.org/x/sync/errgroup"
 )
 
 // Message contains data to be published.
@@ -447,37 +448,38 @@ func (s *Subscription) updateBatchSize() int {
 		return 1
 	}
 	now := time.Now()
-	if s.throughputStart.IsZero() {
-		// No throughput measurement; don't update s.runningBatchSize.
-	} else {
+	// if s.q and s.throughputStart are zero values, continue to decay the s.runningBatchSize
+	elapsed := 0 * time.Second
+	if !s.throughputStart.IsZero() {
 		// Update s.runningBatchSize based on throughput since our last time here,
 		// as measured by the ratio of the number of messages returned to elapsed
 		// time when there were messages available in the queue.
 		if s.throughputEnd.IsZero() {
 			s.throughputEnd = now
 		}
-		elapsed := s.throughputEnd.Sub(s.throughputStart)
-		if elapsed == 0 {
-			// Avoid divide-by-zero.
-			elapsed = 1 * time.Millisecond
-		}
-		msgsPerSec := float64(s.throughputCount) / elapsed.Seconds()
+		elapsed = s.throughputEnd.Sub(s.throughputStart)
+	}
+	if elapsed == 0 {
+		// Avoid divide-by-zero.
+		elapsed = 1 * time.Millisecond
+	}
 
-		// The "ideal" batch size is how many messages we'd need in the queue to
-		// support desiredQueueDuration at the msgsPerSec rate.
-		idealBatchSize := desiredQueueDuration.Seconds() * msgsPerSec
+	msgsPerSec := float64(s.throughputCount) / elapsed.Seconds()
 
-		// Move s.runningBatchSize towards the ideal.
-		// We first combine the previous value and the new value, with weighting
-		// based on decay, and then cap the growth/shrinkage.
-		newBatchSize := s.runningBatchSize*(1-decay) + idealBatchSize*decay
-		if max := s.runningBatchSize * maxGrowthFactor; newBatchSize > max {
-			s.runningBatchSize = max
-		} else if min := s.runningBatchSize * maxShrinkFactor; newBatchSize < min {
-			s.runningBatchSize = min
-		} else {
-			s.runningBatchSize = newBatchSize
-		}
+	// The "ideal" batch size is how many messages we'd need in the queue to
+	// support desiredQueueDuration at the msgsPerSec rate.
+	idealBatchSize := desiredQueueDuration.Seconds() * msgsPerSec
+
+	// Move s.runningBatchSize towards the ideal.
+	// We first combine the previous value and the new value, with weighting
+	// based on decay, and then cap the growth/shrinkage.
+	newBatchSize := s.runningBatchSize*(1-decay) + idealBatchSize*decay
+	if max := s.runningBatchSize * maxGrowthFactor; newBatchSize > max {
+		s.runningBatchSize = max
+	} else if min := s.runningBatchSize * maxShrinkFactor; newBatchSize < min {
+		s.runningBatchSize = min
+	} else {
+		s.runningBatchSize = newBatchSize
 	}
 
 	// Reset throughput measurement markers.
@@ -547,7 +549,6 @@ func (s *Subscription) Receive(ctx context.Context) (_ *Message, err error) {
 			// waiting goroutines, by closing s.waitc.
 			s.waitc = make(chan struct{})
 			batchSize := s.updateBatchSize()
-			log.Println("batch size: ", batchSize)
 
 			go func() {
 				if s.preReceiveBatchHook != nil {
