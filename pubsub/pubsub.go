@@ -547,6 +547,7 @@ func (s *Subscription) Receive(ctx context.Context) (_ *Message, err error) {
 			// waiting goroutines, by closing s.waitc.
 			s.waitc = make(chan struct{})
 			batchSize := s.updateBatchSize()
+			log.Println("batch size: ", batchSize)
 
 			go func() {
 				if s.preReceiveBatchHook != nil {
